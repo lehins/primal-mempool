@@ -1,0 +1,10 @@
+resolver: lts-18.28
+packages:
+- .
+extra-deps:
+- github: lehins/primal
+  commit: 7f4976577b78bcdc42db217443878a28e3b7c15f
+  subdirs:
+    - primal
+    - primal-memory
+    - primal-container

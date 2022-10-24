@@ -1,0 +1,96 @@
+name:                primal-mempool
+version:             0.1.0.0
+synopsis:            Short description
+description:         Please see the README on GitHub at <https://github.com/lehins/primal-mempool#readme>
+homepage:            https://github.com/lehins/primal-mempool
+license:             BSD3
+license-file:        LICENSE
+author:              Alexey Kuleshevich
+maintainer:          alexey@kuleshevi.ch
+copyright:           2022 Alexey Kuleshevich
+category:            Algorithms
+build-type:          Simple
+extra-source-files:  README.md
+                   , CHANGELOG.md
+cabal-version:       1.18
+tested-with:         GHC == 8.0.2
+                   , GHC == 8.2.2
+                   , GHC == 8.4.4
+                   , GHC == 8.6.5
+                   , GHC == 8.8.4
+                   , GHC == 8.10.7
+                   , GHC == 9.0.2
+                   , GHC == 9.2.4
+                   , GHC == 9.4.1
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Primal.Memory.Pool
+
+  other-modules:
+  build-depends:       base >= 4.8 && < 5
+                     , primal
+                     , primal-container
+                     , primal-memory
+
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+                       -Wincomplete-record-updates
+                       -Wincomplete-uni-patterns
+                       -Wredundant-constraints
+
+-- test-suite doctests
+--   type:             exitcode-stdio-1.0
+--   hs-source-dirs:   tests
+--   main-is:          doctests.hs
+--   build-depends: base
+--                , doctest >=0.15
+--                , primal-mempool
+--   default-language:    Haskell2010
+--   ghc-options:        -Wall
+--                       -Wincomplete-record-updates
+--                       -Wincomplete-uni-patterns
+--                       -Wredundant-constraints
+--                       -threaded
+
+test-suite tests
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     tests
+  main-is:            Main.hs
+  other-modules:      Common
+                    , LibSpec
+                    , Spec
+  build-tool-depends: hspec-discover:hspec-discover
+  build-depends:      base
+                    , async
+                    , primal
+                    , primal-mempool
+                    , primal-memory
+                    , hspec
+                    , QuickCheck
+
+  default-language:   Haskell2010
+  ghc-options:        -Wall
+                      -Wincomplete-record-updates
+                      -Wincomplete-uni-patterns
+                      -Wredundant-constraints
+                      -fno-warn-orphans
+                      -threaded
+                      -with-rtsopts=-N
+
+-- benchmark bench
+--   type:                exitcode-stdio-1.0
+--   hs-source-dirs:      bench
+--   main-is:             Bench.hs
+--   ghc-options:         -Wall
+--                        -threaded
+--                        -O2
+--                        -with-rtsopts=-N
+--   build-depends:       base
+--                      , criterion
+--                      , primal-mempool
+--   default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/lehins/primal-mempool
