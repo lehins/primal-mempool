@@ -59,9 +59,13 @@ initPool ::
   => Int
   -- ^ Number of groups per page. Must be a posititve number, otherwise error. One group
   -- contains as many blocks as the operating system has bits. A 64bit architecture will
-  -- have 64 blocks per group.
+  -- have 64 blocks per group. For example, if program is compiled on a 64 bit OS and you
+  -- know ahead of time the maximum number of blocks that will be allocated through out
+  -- the program, then the optimal value for this argument will @maxBlockNum/64@
   -> (forall a. Count Word8 -> ST s (MForeignPtr a s))
-  -- ^ Mempool page allocator. Some allocated pages might be immediately discarded.
+  -- ^ Mempool page allocator. Some allocated pages might be immediately discarded,
+  -- therefore number of pages utilized will not necessesarely match the number of times
+  -- this action will be called.
   -> (Ptr (Block n) -> IO ())
   -- ^ Finalizer to use for each block. It is an IO action because it will be executed by
   -- the Garbage Collector in a separate thread once the `Block` is no longer referenced.
@@ -103,29 +107,27 @@ grabNextPoolBlockWith ::
   -> m (f (Block n) s)
 grabNextPoolBlockWith grabNext pool = go (poolFirstPage pool)
   where
-    go !page@Page {..} = do
+    go page@Page {..} = do
       isPageFull <- atomicReadURef pageFull
       if isPageFull
-        then do
-          atomicReadMutRef pageNextPage >>= \case
-            Nothing -> do
-              newPage <- liftST (poolPageInitializer pool)
-              -- There is a slight chance of a race condition in that the next page could
-              -- have been allocated and assigned to 'pageNextPage' by another thread
-              -- since we last checked for it. This is not a problem since we can safely
-              -- discard the page created in this thread and switch to the one that was
-              -- assigned to 'pageNextPage'.
-              mNextPage <-
-                atomicModifyMutRef pageNextPage $ \mNextPage ->
-                  (mNextPage <|> Just newPage, mNextPage)
-              -- Here we potentially discard the newly allocated page in favor of the one
-              -- created by another thread.
-              go (fromMaybe newPage mNextPage)
-            Just nextPage -> go nextPage
-        else
-          grabNext page (poolBlockFinalizer pool) >>= \case
-            Nothing -> go page
-            Just ma -> pure ma
+        then atomicReadMutRef pageNextPage >>= \case
+               Nothing -> do
+                 newPage <- liftST (poolPageInitializer pool)
+                 -- There is a slight chance of a race condition in that the next page could
+                 -- have been allocated and assigned to 'pageNextPage' by another thread
+                 -- since we last checked for it. This is not a problem since we can safely
+                 -- discard the page created in this thread and switch to the one that was
+                 -- assigned to 'pageNextPage'.
+                 mNextPage <-
+                   atomicModifyMutRef pageNextPage $ \mNextPage ->
+                     (mNextPage <|> Just newPage, mNextPage)
+                 -- Here we potentially discard the newly allocated page in favor of the one
+                 -- created by another thread.
+                 go (fromMaybe newPage mNextPage)
+               Just nextPage -> go nextPage
+        else grabNext page (poolBlockFinalizer pool) >>= \case
+               Nothing -> go page
+               Just ma -> pure ma
 {-# INLINE grabNextPoolBlockWith #-}
 
 
@@ -177,14 +179,15 @@ grabNextPageWithAllocator Page {..} allocator = do
     Just ix ->
       fmap Just $
       withMForeignPtr pageMemory $ \pagePtr ->
-        let blockPtr =
+        let !blockPtr =
               plusByteOffPtr pagePtr $
               Off ix * countToOff (blockByteCount (Block :: Block n))
          in unsafeIOToPrimal $ allocator blockPtr $ do
-              let (q, r) = ix `quotRem` ixBitSize
+              let !(!q, !r) = ix `quotRem` ixBitSize
+                  !pageBitMask = clearBit maxBound r
               touch pageMemory
               pageBitArrayIO <- unsafeCastDataState pageBitArray
-              _ <- atomicAndFetchNewMutArray pageBitArrayIO q (clearBit maxBound r)
+              _ <- atomicAndFetchNewMutArray pageBitArrayIO q pageBitMask
               pageFullIO <- unsafeCastDataState pageFull
               atomicWriteURef pageFullIO False
 {-# INLINE grabNextPageWithAllocator #-}
@@ -193,7 +196,7 @@ grabNextPageWithAllocator Page {..} allocator = do
 
 findNextZeroIndex :: forall b. FiniteBits b => b -> Maybe Int
 findNextZeroIndex b =
-  let i0 = countTrailingZeros b
+  let !i0 = countTrailingZeros b
       i1 = countTrailingZeros (complement b)
       maxBits = finiteBitSize (undefined :: b)
    in if i0 == 0
@@ -206,8 +209,8 @@ findNextZeroIndex b =
 setNextZero :: Primal s m => UMArray Word s -> m (Maybe Int)
 setNextZero ma = ifindAtomicMutArray ma f
   where
-    f i w =
+    f i !w =
       case findNextZeroIndex w of
         Nothing -> (w, Nothing)
-        Just bitIx -> (setBit w bitIx, Just (ixBitSize * i + bitIx))
+        Just !bitIx -> (setBit w bitIx, Just (ixBitSize * i + bitIx))
 {-# INLINE setNextZero #-}
