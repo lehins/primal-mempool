@@ -89,9 +89,11 @@ initPool groupsPerPage memAlloc blockFinalizer = do
 
 grabNextPoolMForeignPtr :: (Primal s m, KnownNat n) => Pool n s -> m (MForeignPtr (Block n) s)
 grabNextPoolMForeignPtr = grabNextPoolBlockWith grabNextPageForeignPtr
+{-# INLINE grabNextPoolMForeignPtr #-}
 
 grabNextPoolFMAddr :: (Primal s m, KnownNat n) => Pool n s -> m (FMAddr (Block n) s)
 grabNextPoolFMAddr = grabNextPoolBlockWith grabNextPageFMAddr
+{-# INLINE grabNextPoolFMAddr #-}
 
 
 grabNextPoolBlockWith ::
@@ -124,6 +126,7 @@ grabNextPoolBlockWith grabNext pool = go (poolFirstPage pool)
           grabNext page (poolBlockFinalizer pool) >>= \case
             Nothing -> go page
             Just ma -> pure ma
+{-# INLINE grabNextPoolBlockWith #-}
 
 
 grabNextPageFMAddr ::
@@ -138,6 +141,7 @@ grabNextPageFMAddr page finalizer =
   grabNextPageWithAllocator page $ \blockPtr resetIndex ->
     allocWithFinalizerFMAddr 1 (const (pure blockPtr)) $ \ptr ->
       finalizer ptr >> resetIndex
+{-# INLINE grabNextPageFMAddr #-}
 
 
 grabNextPageForeignPtr ::
@@ -153,6 +157,7 @@ grabNextPageForeignPtr page finalizer =
     fp <- newForeignPtr_ blockPtr
     addForeignPtrConcFinalizer fp $ finalizer blockPtr >> resetIndex
     pure $ MForeignPtr fp
+{-# INLINE grabNextPageForeignPtr #-}
 
 grabNextPageWithAllocator ::
      forall f n m s. (Primal s m, KnownNat n)
@@ -182,6 +187,7 @@ grabNextPageWithAllocator Page {..} allocator = do
               _ <- atomicAndFetchNewMutArray pageBitArrayIO q (clearBit maxBound r)
               pageFullIO <- unsafeCastDataState pageFull
               atomicWriteURef pageFullIO False
+{-# INLINE grabNextPageWithAllocator #-}
 
 
 
@@ -195,6 +201,7 @@ findNextZeroIndex b =
                then Nothing
                else Just i1
         else Just (i0 - 1)
+{-# INLINE findNextZeroIndex #-}
 
 setNextZero :: Primal s m => UMArray Word s -> m (Maybe Int)
 setNextZero ma = ifindAtomicMutArray ma f
@@ -203,3 +210,4 @@ setNextZero ma = ifindAtomicMutArray ma f
       case findNextZeroIndex w of
         Nothing -> (w, Nothing)
         Just bitIx -> (setBit w bitIx, Just (ixBitSize * i + bitIx))
+{-# INLINE setNextZero #-}
