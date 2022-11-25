@@ -6,23 +6,24 @@
 
 module Test.Primal.Memory.PoolSpec (spec) where
 
-import System.Random.Stateful
-import Data.Function
 import Common
-import Control.Concurrent.Chan
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
+import Control.Concurrent.Chan
+import Data.Bits
+import Data.Function
+import Data.Reflection
 import GHC.TypeNats
+import Primal.Eval
+import Primal.Memory
 import Primal.Memory.FAddr
 import Primal.Memory.ForeignPtr
-import Primal.Memory
 import Primal.Memory.GC (performGC)
 import Primal.Memory.Pool
 import Primal.Memory.Ptr
 import Primal.Ref.Unboxed
 import Primal.Ref.Unboxed.Atomic
-import Primal.Eval
-import Data.Bits
+import System.Random.Stateful
 
 
 spec :: Spec
@@ -32,10 +33,11 @@ spec = do
     describe "MForeignPtr" $ do
       poolProps grabNextMForeignPtr finalizeMForeignPtr (Block :: Block 32)
       poolProps grabNextMForeignPtr finalizeMForeignPtr (Block :: Block 64)
-    describe "MAddr" $ do
+      poolPropsArbSizeBlockMForeignPtr
+    describe "FMAddr" $ do
       poolProps grabNextFMAddr finalizeFMAddr (Block :: Block 32)
       poolProps grabNextFMAddr finalizeFMAddr (Block :: Block 64)
-    -- poolPropsArbSizeBlock
+      poolPropsArbSizeBlockFMAddr
 
 poolProps ::
      (KnownNat n, MemPtr (ma (Block n)))
@@ -47,6 +49,29 @@ poolProps grabNext finalize block =
   describe ("Block " ++ show (blockByteCount block)) $ do
     prop "PoolGarbageCollected" $ propPoolGarbageCollected grabNext block
     prop "PoolAllocateAndFinalize" $ propPoolAllocateAndFinalize grabNext finalize block
+
+poolPropsArbSizeBlockMForeignPtr :: Spec
+poolPropsArbSizeBlockMForeignPtr =
+  describe "Arbitrary sized block" $ do
+    prop "PoolGarbageCollected" $ \(Positive n) ->
+      reifyNat n (propPoolGarbageCollected grabNextMForeignPtr . proxyToBlock)
+    prop "PoolAllocateAndFinalize" $ \(Positive n) ->
+      reifyNat n (propPoolAllocateAndFinalize grabNextMForeignPtr finalizeMForeignPtr . proxyToBlock)
+  where
+    proxyToBlock :: Proxy n -> Block n
+    proxyToBlock Proxy = Block
+
+
+poolPropsArbSizeBlockFMAddr :: Spec
+poolPropsArbSizeBlockFMAddr =
+  describe "Arbitrary sized block" $ do
+    prop "PoolGarbageCollected" $ \(Positive n) ->
+      reifyNat n (propPoolGarbageCollected grabNextFMAddr . proxyToBlock)
+    prop "PoolAllocateAndFinalize" $ \(Positive n) ->
+      reifyNat n (propPoolAllocateAndFinalize grabNextFMAddr finalizeFMAddr . proxyToBlock)
+  where
+    proxyToBlock :: Proxy n -> Block n
+    proxyToBlock Proxy = Block
 
 
 propFindNextZeroIndex :: Word -> Expectation
