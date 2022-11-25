@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
-
+{-# OPTIONS_GHC -Wno-orphans #-}
 module Main where
 
 import Foreign.Marshal.Alloc
@@ -35,11 +35,11 @@ main = do
   let n = 10240
       blockSize = 32
   defaultMain
-    [ bgroup "Optimal"
+    [ bgroup "Sequential"
       [ env (initHaskellPool @32 (n `div` 64)) $ \pool ->
-          bench "FMAddr" $ nfIO (replicateM n (grabNextPoolFMAddr pool))
+          bench "FMAddr" $ nfIO (replicateM n (grabNextFMAddr pool))
       , env (initHaskellPool @32 (n `div` 64)) $ \pool ->
-          bench "MForeignPtr" $ nfIO (replicateM n (grabNextPoolMForeignPtr pool))
+          bench "MForeignPtr" $ nfIO (replicateM n (grabNextMForeignPtr pool))
       , bench "ForeignPtr (ByteArray)" $
           nfIO (replicateM n (mallocByteCountForeignPtr (fromIntegral blockSize)))
       , bench "ForeignPtr (malloc)" $
@@ -47,9 +47,9 @@ main = do
       ]
     , bgroup "Concurrent"
       [ env (initHaskellPool @32 (n `div` 64)) $ \pool ->
-          bench "FMAddr" $ nfIO (pooledReplicateConcurrently n (grabNextPoolFMAddr pool))
+          bench "FMAddr" $ nfIO (pooledReplicateConcurrently n (grabNextFMAddr pool))
       , env (initHaskellPool @32 (n `div` 64)) $ \pool ->
-          bench "MForeignPtr" $ nfIO (pooledReplicateConcurrently n (grabNextPoolMForeignPtr pool))
+          bench "MForeignPtr" $ nfIO (pooledReplicateConcurrently n (grabNextMForeignPtr pool))
       , bench "ForeignPtr (ByteArray)" $
           nfIO (pooledReplicateConcurrently n (mallocByteCountForeignPtr (fromIntegral blockSize)))
       , bench "ForeignPtr (malloc)" $
