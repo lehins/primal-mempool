@@ -8,13 +8,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- |
--- Module      : Primal.Memory.Pool
+-- Module      : Primal.Memory.Pool.LockFree
 -- Copyright   : (c) Alexey Kuleshevich 2022
 -- License     : BSD3
 -- Maintainer  : Alexey Kuleshevich <alexey@kuleshevi.ch>
 -- Stability   : experimental
 -- Portability : non-portable
-module Primal.Memory.Pool
+module Primal.Memory.Pool.LockFree
   ( Pool
   , initPool
   , Block(..)
