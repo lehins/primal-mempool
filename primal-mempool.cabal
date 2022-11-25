@@ -66,6 +66,7 @@ test-suite tests
                     , primal
                     , primal-mempool
                     , primal-memory
+                    , random
                     , hspec
                     , QuickCheck
 

@@ -3,7 +3,7 @@ packages:
 - .
 extra-deps:
 - github: lehins/primal
-  commit: 65a9d30f5c40d59172ca41629964efb0ff0b0783
+  commit: c752d8788cb9597224d6f7e6a5163473a74b7b5a
   subdirs:
     - primal
     - primal-memory

@@ -6,7 +6,10 @@
 
 module Test.Primal.Memory.PoolSpec (spec) where
 
+import System.Random.Stateful
+import Data.Function
 import Common
+import Control.Concurrent.Chan
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
 import GHC.TypeNats
@@ -27,22 +30,23 @@ spec = do
   describe "Pool" $ do
     prop "findNextZeroIndex" $ propFindNextZeroIndex
     describe "MForeignPtr" $ do
-      poolProps grabNextMForeignPtr (Block :: Block 32)
-      poolProps grabNextMForeignPtr (Block :: Block 64)
+      poolProps grabNextMForeignPtr finalizeMForeignPtr (Block :: Block 32)
+      poolProps grabNextMForeignPtr finalizeMForeignPtr (Block :: Block 64)
     describe "MAddr" $ do
-      poolProps grabNextFMAddr (Block :: Block 32)
-      poolProps grabNextFMAddr (Block :: Block 64)
+      poolProps grabNextFMAddr finalizeFMAddr (Block :: Block 32)
+      poolProps grabNextFMAddr finalizeFMAddr (Block :: Block 64)
     -- poolPropsArbSizeBlock
 
 poolProps ::
      (KnownNat n, MemPtr (ma (Block n)))
   => (Pool n RW -> IO (ma (Block n) RW))
+  -> (ma (Block n) RW -> IO ())
   -> Block n
   -> Spec
-poolProps grabNext block =
+poolProps grabNext finalize block =
   describe ("Block " ++ show (blockByteCount block)) $ do
     prop "PoolGarbageCollected" $ propPoolGarbageCollected grabNext block
-    -- prop "PoolAllocateAndFinalize" $ propPoolAllocateAndFinalize block
+    prop "PoolAllocateAndFinalize" $ propPoolAllocateAndFinalize grabNext finalize block
 
 
 propFindNextZeroIndex :: Word -> Expectation
@@ -119,11 +123,7 @@ ensureAllGCed n f = do
   res <$ go iters
 
 
-mallocPreFilled ::
-     forall mut s. MemAlloc mut
-  => Word8
-  -> Count Word8
-  -> ST s (mut s)
+mallocPreFilled :: forall a s. Word8 -> Count Word8 -> ST s (MForeignPtr a s)
 mallocPreFilled preFillByte bc = do
   mut <- allocMutMem bc
   mut <$ setByteOffMutMem mut 0 bc preFillByte
@@ -143,7 +143,7 @@ propPoolGarbageCollected grabNext block (Positive n) numBlocks16 preFillByte fil
   (pool, ptrs) <-
     ensureAllGCed numBlocks $ \countOneBlockGCed -> do
       pool <-
-        initPool n (mallocPreFilled @(MForeignPtr _) preFillByte) $ \ptr -> do
+        initPool n (mallocPreFilled preFillByte) $ \ptr -> do
           setPtr (castPtr ptr) (blockByteCount block) fillByte
           countOneBlockGCed
       fmps :: [ma (Block n) RW] <-
@@ -161,3 +161,47 @@ propPoolGarbageCollected grabNext block (Positive n) numBlocks16 preFillByte fil
   -- Ensure that memory to that the pointers are referencing to is still alive
   touch pool
 
+
+propPoolAllocateAndFinalize ::
+     forall (ma :: * -> * -> *) n. (KnownNat n, MemPtr (ma (Block n)))
+  => (Pool n RW -> IO (ma (Block n) RW))
+  -> (ma (Block n) RW -> IO ())
+  -> Block n
+  -> Positive Int
+  -> Word16
+  -> Word8
+  -> Word8
+  -> Int
+  -> Expectation
+propPoolAllocateAndFinalize grabNext finalize block np numBlocks16 emptyByte fullByte seed = do
+  let Positive n = np
+      numBlocks = 1 + (fromIntegral numBlocks16 `div` 20)
+  pool <-
+    ensureAllGCed numBlocks $ \countOneBlockGCed -> do
+      chan <- newChan
+      pool <-
+        initPool n (mallocPreFilled emptyByte) $ \(ptr :: Ptr (Block n)) -> do
+          setPtr (castPtr ptr) (blockByteCount block) emptyByte
+          countOneBlockGCed
+      -- allocate and finalize blocks concurrently
+      pool <$
+        concurrently_
+          (do replicateConcurrently_ numBlocks $ do
+                fp <- grabNext pool
+                withPtrMutMem fp (checkBlockBytes block emptyByte)
+                writeChan chan (Just fp)
+              -- place Nothing to indicate we are done allocating blocks
+              writeChan chan Nothing)
+          (runStateGenT_ (mkStdGen seed) $ \gen ->
+             fix $ \loop -> do
+               mfp <- liftIO $ readChan chan
+               forM_ mfp $ \fp -> do
+                 liftIO $ withPtrMutMem fp $ \ptr ->
+                   -- fill the newly allocated block
+                   setPtr ptr (blockByteCount block) fullByte
+                 -- manually finalize every other block and let the GC to pick the rest
+                 shouldFinalize <- uniformM gen
+                 when shouldFinalize $ liftIO $ finalize fp
+                 loop)
+  -- verify number of pages
+  checkNumPages pool n numBlocks
