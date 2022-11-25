@@ -28,7 +28,6 @@ module Primal.Memory.Pool
 
 import Control.Applicative
 import Data.Bits
-import Data.Maybe
 import GHC.TypeLits
 import Primal.Array.Boxed
 import Primal.Array.Unboxed
@@ -129,10 +128,10 @@ grabNextPoolBlockWith ::
   -> m (f (Block n) s)
 grabNextPoolBlockWith grabNext pool = go (poolFirstPage pool)
   where
-    go page@Page {..} = do
-      isPageFull <- atomicReadURef pageFull
+    go page = do
+      isPageFull <- atomicReadURef (pageFull page)
       if isPageFull
-        then atomicReadMutRef pageNextPage >>= \case
+        then atomicReadMutRef (pageNextPage page) >>= \case
                Nothing -> do
                  newPage <- liftST (poolPageInitializer pool)
                  -- There is a slight chance of a race condition in that the next page could
@@ -141,11 +140,17 @@ grabNextPoolBlockWith grabNext pool = go (poolFirstPage pool)
                  -- discard the page created in this thread and switch to the one that was
                  -- assigned to 'pageNextPage'.
                  mNextPage <-
-                   atomicModifyMutRef pageNextPage $ \mNextPage ->
+                   atomicModifyMutRef (pageNextPage page) $ \mNextPage ->
                      (mNextPage <|> Just newPage, mNextPage)
-                 -- Here we potentially discard the newly allocated page in favor of the one
-                 -- created by another thread.
-                 go (fromMaybe newPage mNextPage)
+                 case mNextPage of
+                   Nothing -> go newPage
+                   Just existingPage -> do
+                     -- Here we cleanup the newly allocated page in favor of the one that
+                     -- was potentially created by another thread. It is important to
+                     -- eagerly free up scarce resources
+                     unsafeIOToPrimal $
+                       unsafeCastDataState (pageMemory newPage) >>= finalizeMForeignPtr
+                     go existingPage
                Just nextPage -> go nextPage
         else grabNext page (poolBlockFinalizer pool) >>= \case
                Nothing -> go page
