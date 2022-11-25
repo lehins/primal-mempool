@@ -90,7 +90,7 @@ propFindNextZeroIndex w =
 -- reservations
 checkNumPages :: Pool n RW -> Int -> Int -> Expectation
 checkNumPages pool n numBlocks = do
-  let estimatedUpperBoundOfPages = 1 + max 1 (numBlocks `div` n `div` 64)
+  let estimatedUpperBoundOfPages = 2 + max 1 (numBlocks `div` n `div` 64)
   numPages <- countPages pool
   unless (numPages <= estimatedUpperBoundOfPages) $
     expectationFailure $
