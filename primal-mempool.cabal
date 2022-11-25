@@ -58,8 +58,8 @@ test-suite tests
   hs-source-dirs:     tests
   main-is:            Main.hs
   other-modules:      Common
-                    , LibSpec
                     , Spec
+                    , Test.Primal.Memory.PoolSpec
   build-tool-depends: hspec-discover:hspec-discover
   build-depends:      base
                     , async

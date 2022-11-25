@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -13,7 +14,17 @@
 -- Maintainer  : Alexey Kuleshevich <alexey@kuleshevi.ch>
 -- Stability   : experimental
 -- Portability : non-portable
-module Primal.Memory.Pool where
+module Primal.Memory.Pool
+  ( Pool
+  , initPool
+  , Block(..)
+  , blockByteCount
+  , grabNextFMAddr
+  , grabNextMForeignPtr
+  -- * Exported for testing
+  , findNextZeroIndex
+  , countPages
+  ) where
 
 import Control.Applicative
 import Data.Bits
@@ -91,13 +102,24 @@ initPool groupsPerPage memAlloc blockFinalizer = do
       , poolBlockFinalizer = blockFinalizer
       }
 
-grabNextPoolMForeignPtr :: (Primal s m, KnownNat n) => Pool n s -> m (MForeignPtr (Block n) s)
-grabNextPoolMForeignPtr = grabNextPoolBlockWith grabNextPageForeignPtr
-{-# INLINE grabNextPoolMForeignPtr #-}
 
-grabNextPoolFMAddr :: (Primal s m, KnownNat n) => Pool n s -> m (FMAddr (Block n) s)
-grabNextPoolFMAddr = grabNextPoolBlockWith grabNextPageFMAddr
-{-# INLINE grabNextPoolFMAddr #-}
+-- | Useful function for testing. Check how many pages have been allocated thus far.
+countPages :: Primal s m => Pool n s -> m Int
+countPages pool = go 1 (poolFirstPage pool)
+  where
+    go n Page {pageNextPage} = do
+      readBRef pageNextPage >>= \case
+        Nothing -> pure n
+        Just nextPage -> go (n + 1) nextPage
+
+
+grabNextMForeignPtr :: (Primal s m, KnownNat n) => Pool n s -> m (MForeignPtr (Block n) s)
+grabNextMForeignPtr = grabNextPoolBlockWith grabNextPageForeignPtr
+{-# INLINE grabNextMForeignPtr #-}
+
+grabNextFMAddr :: (Primal s m, KnownNat n) => Pool n s -> m (FMAddr (Block n) s)
+grabNextFMAddr = grabNextPoolBlockWith grabNextPageFMAddr
+{-# INLINE grabNextFMAddr #-}
 
 
 grabNextPoolBlockWith ::
@@ -140,7 +162,7 @@ grabNextPageFMAddr ::
   -> (Ptr (Block n) -> IO ())
   -> m (Maybe (FMAddr (Block n) s))
 grabNextPageFMAddr page finalizer =
-  grabNextPageWithAllocator page $ \blockPtr resetIndex ->
+  grabNextPageWithAllocator page $ \blockPtr resetIndex -> unsafeIOToPrimal $ do
     allocWithFinalizerFMAddr 1 (const (pure blockPtr)) $ \ptr ->
       finalizer ptr >> resetIndex
 {-# INLINE grabNextPageFMAddr #-}
@@ -164,7 +186,7 @@ grabNextPageForeignPtr page finalizer =
 grabNextPageWithAllocator ::
      forall f n m s. (Primal s m, KnownNat n)
   => Page n s
-  -> (Ptr (Block n) -> IO () -> IO (f (Block n) s))
+  -> (Ptr (Block n) -> IO () -> IO (f (Block n) RW))
   -> m (Maybe (f (Block n) s))
 grabNextPageWithAllocator Page {..} allocator = do
   setNextZero pageBitArray >>= \case
@@ -176,9 +198,8 @@ grabNextPageWithAllocator Page {..} allocator = do
     -- order to prevent the degenerate case of all Blocks beeing finalized right before
     -- the page is marked as full.
     Nothing -> Nothing <$ atomicWriteURef pageFull True
-    Just ix ->
-      fmap Just $
-      withMForeignPtr pageMemory $ \pagePtr ->
+    Just ix -> do
+      fm <- withMForeignPtr pageMemory $ \pagePtr ->
         let !blockPtr =
               plusByteOffPtr pagePtr $
               Off ix * countToOff (blockByteCount (Block :: Block n))
@@ -190,6 +211,7 @@ grabNextPageWithAllocator Page {..} allocator = do
               _ <- atomicAndFetchNewMutArray pageBitArrayIO q pageBitMask
               pageFullIO <- unsafeCastDataState pageFull
               atomicWriteURef pageFullIO False
+      Just <$> unsafeCastDataState fm
 {-# INLINE grabNextPageWithAllocator #-}
 
 
